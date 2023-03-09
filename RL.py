@@ -2,13 +2,17 @@ import numpy as np
 import torch
 import torch.nn as nn
 import random
+from tqdm import tqdm
+import copy
 
-epochs=1000
-eps=0.1
+epochs=100
+eps=0.2
 batch_size=100
-gamma=0.1
+gamma=1
 C=5
-Q_updating_epochs=20
+Q_updating_epochs=100
+
+cache_capacity=0
 
 def difficulty_single_syll(fingering):
     #此函数评价单个音符的指法所用
@@ -94,46 +98,66 @@ def generate_fingering_per_syll(syll):
             ind+=1
     return result
 
-class DQN(nn.Modulel):
+class DQN(nn.Module):
     def __init__(self):
         super(DQN,self).__init__()
         self.layer=nn.Sequential(
-            nn.Linear(11,7),
+            nn.Linear(11,128),
             nn.Sigmoid(),
-            nn.Linear(7,4),
+            nn.Linear(128,64),
             nn.Sigmoid(),
-            nn.Linear(4,1))
+            nn.Linear(64,32),
+            nn.Sigmoid(),
+            nn.Linear(32,1))
     def forward(self,x):
         return self.layer(x)
     def train(self,x,y):
         criterion = torch.nn.MSELoss(reduction='sum')
-        optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3,eps=1e-8,betas=(0.9,0.999))
+        y=torch.tensor(y)
+        x=torch.tensor(x)
         for i in range(Q_updating_epochs):
             y_pred = self.forward(x)
             loss = criterion(y_pred, y)
             optimizer.zero_grad()
             loss.backward()
-             optimizer.step()
-def get_argmin_Q(Q,s,action_list):
-    state_action=[]
+            optimizer.step()
+class LimitedList:
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.list = []
+
+    def append(self, item):
+        if len(self.list) >= self.capacity:
+            self.list.pop(0)
+        self.list.append(item)
+
+    def __getitem__(self, index):
+        return self.list[index]
+
+    def __len__(self):
+        return len(self.list)
+def get_argmin_Q(Q,state,action_list):
+    state_action=[] #每个元素是state和action_list的对应项合并的结果
     for action in action_list:
         state_action.append(state.tolist()+action.tolist())
     Q_values=Q(torch.tensor(state_action))
-    action=action_list[Q.argmin()]
-    return action,Q(action)
+    idx=Q_values.argmin()
+    action=action_list[idx]
+    return action,Q(torch.tensor(state_action[idx]))
 def get_trained_Q(notes):
     Q=DQN()
     Q_hat=DQN()
     D=[]
-    for epoch in range(1,epochs):
+    for epoch in tqdm(range(0,epochs)):
         state=np.array([0,0,0,0,0,-1])
         for t in range(-1,len(notes)-1):
             action_list=generate_fingering_per_syll(notes[t+1])
             if random.random()<eps:
                 a_t=action_list[random.randint(0,len(action_list)-1)]
             else:
-                a_t,_=get_argmin_Q(Q,stateaction_list)
-            r_t=penalty(state,a_t)
+                a_t,_=get_argmin_Q(Q,state,action_list)
+            r_t=penalty(copy.deepcopy(state),copy.deepcopy(a_t))
             state_t_plus_1=np.concatenate((a_t,[state[-1]+1]))
             D.append((state,a_t,r_t,state_t_plus_1))
             _batch_size=min(batch_size,len(D))
@@ -145,11 +169,13 @@ def get_trained_Q(notes):
                 if _state[-1]==len(notes)-1:
                     y.append([_r_t])
                 else:
-                    action_list=generate_fingering_per_syll(notes[_state[-1]+1])
+                    action_list=generate_fingering_per_syll(notes[int(_state[-1])+1])
                     argmin_action,argmin_Q=get_argmin_Q(Q_hat,_state,action_list)
-                    x.append(np.concatenate((_state,argmin_action)))
+                    x.append(np.concatenate((_state,argmin_action)).astype(np.float32))
                     y.append([_r_t+gamma*argmin_Q])
+            x=np.array(x)
             Q.train(x,y)
+            state=state_t_plus_1
         if (epoch+1)%C==0 or epoch==epochs-1:
             Q_hat.layer.load_state_dict(Q.layer.state_dict())
     return Q_hat
@@ -159,7 +185,8 @@ def generate_fingering(notes):
     state=np.array([0,0,0,0,0,-1])
     for t in range(-1,len(notes)-1):
         action_list=generate_fingering_per_syll(notes[t+1])
-        a_t,_=get_argmin_Q(Q,stateaction_list)
-        fingering_list.append(np.where(a_t!=0)+1)
+        a_t,_=get_argmin_Q(Q,state,action_list)
+        state=np.array(a_t.tolist()+[t+1])
+        fingering_list.append(np.where(a_t!=0)[0]+1)
     return fingering_list
 

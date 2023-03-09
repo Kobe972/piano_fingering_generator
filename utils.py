@@ -3,9 +3,9 @@ from music21.musicxml import *
 
 def name_to_num(name):
     if len(name.split('#'))>1:
-        result=7*(int(name.split('#')[-1])-1)+0.5
+        result=7*(int(name.split('#')[-1])-1)
     elif len(name.split('-'))>1:
-        result=7*(int(name.split('-')[-1])-1)-0.5
+        result=7*(int(name.split('-')[-1])-1)
     else:
         result=7*(int(name[1:])-1)
     if name[0]=='D':
@@ -46,7 +46,7 @@ def get_notes_from_xml(file_path):
 def addFingering(note,fingering):
     note.articulations.append(articulations.Fingering(fingering))
 
-if __name__='__main__':
+if __name__=='__main__':
     '''
     以下是测试部分
     解析音符，添加指法
